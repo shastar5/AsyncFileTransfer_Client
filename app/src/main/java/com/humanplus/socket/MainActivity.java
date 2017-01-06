@@ -1,6 +1,7 @@
 package com.humanplus.socket;
 
 import android.Manifest;
+import android.content.ClipData;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -43,25 +44,27 @@ import static com.humanplus.socket.BuildConfig.DEBUG;
 public class MainActivity extends AppCompatActivity {
 
     private static final int SELECT_PICTURE = 1;
+    private static final int STORAGE_PERMISSION = 2;
     private static final int SELECT_VIDEO = 3;
 
-    private String selectedImagePath;
+    private String[] selectedImagePath;
     private String selectedVideoPath;
-    private ImageView img;
-    private VideoView videoView;
 
+    // 2 Sockets for video and imgs.
     private Socket socket, socket2;
 
+    private int i = 0;
+    private int count = 0;
     // Use your IP and Port. port must be between 1024 ~ 49151
     private static final String ip = "192.168.0.45";
-    private static final int port = 1153;
-
-    private static final int STORAGE_PERMISSION = 2;
+    private static final int port = 1157;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+
+        selectedImagePath = new String[20];
 
         // For denied permission.
         StrictMode.ThreadPolicy policy = new StrictMode.ThreadPolicy.Builder().permitAll().build();
@@ -70,20 +73,18 @@ public class MainActivity extends AppCompatActivity {
         // Checks external storage read/write
         checkPermission();
 
-        img = (ImageView)findViewById(R.id.imageView);
-        videoView = (VideoView)findViewById(R.id.videoView);
-
     }
 
     public void onClickButton(View v) {
         switch(v.getId()) {
+
             // Select Image
             case R.id.button:
                 Intent intent = new Intent();
                 intent.setType("image/*");
                 intent.setAction(Intent.ACTION_GET_CONTENT);
-                startActivityForResult(Intent.createChooser(intent, "Select img"),
-                        SELECT_PICTURE);
+                intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+                startActivityForResult(Intent.createChooser(intent, "Select img"), SELECT_PICTURE);
                 break;
 
             // Select Video
@@ -98,32 +99,29 @@ public class MainActivity extends AppCompatActivity {
             // Supports only jpg files
             case R.id.button2:
 
-                Thread thread = new Thread() {
-                    @Override
-                    public void run() {
-                        try {
-                            socket = new Socket(ip, port);
-                            System.out.println("Connecting...");
+                for(i = 0 ; i < count ;i++) {
 
-                            File file = new File(selectedImagePath);
-                            byte[] bytes = new byte[(int) file.length()];
-                            FileInputStream fis = new FileInputStream(file);
-                            BufferedInputStream bis = new BufferedInputStream(fis);
-                            bis.read(bytes, 0, bytes.length);
-                            OutputStream os = socket.getOutputStream();
-                            System.out.println("Sending...");
+                    try {
+                        socket = new Socket(ip, port);
+                        System.out.println("Connecting...");
 
-                            os.write(bytes, 0, bytes.length);
-                            os.flush();
+                        File file = new File(selectedImagePath[i]);
+                        byte[] bytes = new byte[(int) file.length()];
+                        FileInputStream fis = new FileInputStream(file);
+                        BufferedInputStream bis = new BufferedInputStream(fis);
+                        bis.read(bytes, 0, bytes.length);
+                        OutputStream os = socket.getOutputStream();
+                        System.out.println("Sending...");
 
-                            socket.close();
-                        } catch(Exception e) {
-                            e.printStackTrace();
-                        }
+                        os.write(bytes, 0, bytes.length);
+                        os.flush();
+
+                        socket.close();
+                    } catch (Exception e) {
+                        e.printStackTrace();
                     }
-                };
-                thread.start();
 
+                }
                 break;
 
             // Start transferring video
@@ -163,19 +161,56 @@ public class MainActivity extends AppCompatActivity {
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         if(resultCode==RESULT_OK) {
             if(requestCode == SELECT_PICTURE) {
-                Uri selectedImageUri = data.getData();
-                selectedImagePath = getPath(this, selectedImageUri);
-                System.out.println("Image Path: " + selectedImagePath);
-                img.setImageURI(selectedImageUri);
+
+                // Put data to clipData.
+                // Because Android Intent cannot get the array type of Strings.
+                ClipData clipData = data.getClipData();
+                count = clipData.getItemCount();
+
+                for(int i = 0; i<count;i++) {
+                    System.out.println(clipData.getItemAt(i).getUri().toString());
+                    selectedImagePath[i] = getPath(this, clipData.getItemAt(i).getUri());
+                    System.out.println("Image Path: " + selectedImagePath[i]);
+                }
             }
 
             else if(requestCode == SELECT_VIDEO) {
                 Uri selectedImageUri = data.getData();
                 selectedVideoPath = getPath(this, selectedImageUri);
                 System.out.println("Media Path: " + selectedVideoPath);
-                videoView.setVideoURI(selectedImageUri);
             }
         }
+    }
+
+    private void fileTransfer() {
+        Thread thread = new Thread() {
+            @Override
+            public void run() {
+                try {
+                    socket = new Socket(ip, port);
+                    System.out.println("Connecting...");
+
+                    File file = new File(selectedImagePath[i]);
+
+                    byte[] bytes = new byte[(int)file.length()];
+                    FileInputStream fis = new FileInputStream(file);
+                    BufferedInputStream bis = new BufferedInputStream(fis);
+                    bis.read(bytes, 0, bytes.length);
+                    OutputStream os = socket.getOutputStream();
+
+                    System.out.println("Sending...");
+
+                    os.write(bytes, 0, bytes.length);
+                    os.flush();
+
+                    socket.close();
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }
+        };
+
+        thread.start();
     }
 
     public static boolean isMediaDocument(Uri uri) {
